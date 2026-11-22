@@ -1,0 +1,677 @@
+
+<!DOCTYPE html>
+<html lang="az">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>GMod: Nextbot Chase</title>
+
+<style>
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    user-select: none;
+}
+
+html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #000;
+    font-family: Arial, sans-serif;
+    touch-action: none;
+}
+
+#game {
+    position: fixed;
+    inset: 0;
+}
+
+canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+#menu, #gameover {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    background: rgba(0,0,0,.88);
+    color: white;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 20px;
+}
+
+#menu h1 {
+    font-size: 30px;
+    text-align: center;
+}
+
+button {
+    border: none;
+    color: white;
+    background: #168ed0;
+    padding: 17px 45px;
+    border-radius: 12px;
+    font-size: 20px;
+    font-weight: bold;
+}
+
+#hud {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: white;
+    background: rgba(0,0,0,.65);
+    padding: 12px 25px;
+    border-radius: 10px;
+    font-size: 23px;
+    font-weight: bold;
+    z-index: 3;
+    pointer-events: none;
+}
+
+#status {
+    position: fixed;
+    top: 70px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: #fff;
+    background: rgba(0,0,0,.5);
+    padding: 5px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    z-index: 8;
+    pointer-events: none;
+    text-align: center;
+}
+
+#controls {
+    position: fixed;
+    inset: 0;
+    z-index: 4;
+    pointer-events: none;
+}
+
+#joystick {
+    position: absolute;
+    bottom: 45px;
+    left: 45px;
+    width: 125px;
+    height: 125px;
+    border: 4px solid rgba(255,255,255,.5);
+    border-radius: 50%;
+    pointer-events: auto;
+    touch-action: none;
+}
+
+#stick {
+    position: absolute;
+    width: 55px;
+    height: 55px;
+    border-radius: 50%;
+    background: #159ddd;
+    left: 31px;
+    top: 31px;
+}
+
+#jump {
+    position: absolute;
+    right: 35px;
+    bottom: 65px;
+    width: 105px;
+    height: 105px;
+    border-radius: 50%;
+    background: #222;
+    border: 3px solid rgba(255,255,255,.4);
+    pointer-events: auto;
+    touch-action: none;
+    padding: 0;
+    font-size: 17px;
+}
+
+#gameover {
+    display: none;
+    background: rgba(0,0,0,.95);
+}
+
+#scare {
+    width: min(85vw, 450px);
+    max-height: 55vh;
+    object-fit: contain;
+}
+
+#gameover h1 {
+    color: #e33;
+    font-size: 35px;
+}
+
+@media (min-width: 800px) {
+    #joystick, #jump {
+        display: none;
+    }
+}
+</style>
+</head>
+
+<body>
+
+<div id="game"></div>
+
+<div id="menu">
+    <h1>GMOD: NEXTBOT CHASE</h1>
+    <button id="start">OYNA</button>
+</div>
+
+<div id="hud">00:00</div>
+<div id="status"></div>
+
+<div id="controls">
+    <div id="joystick">
+        <div id="stick"></div>
+    </div>
+    <button id="jump">TULLAN</button>
+</div>
+
+<div id="gameover">
+    <h1>YAXALANDIN!</h1>
+    <img id="scare" src="IMG_20261122_184303_190.jpg">
+    <button id="restart">YENİDƏN OYNA</button>
+</div>
+
+<audio id="chaseAudio"
+src="verity-asmr-made-with-Voicemod.mp3"
+loop preload="auto"></audio>
+
+<audio id="screamAudio"
+src="download.mp3"
+preload="auto"></audio>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
+
+<script>
+const container = document.getElementById("game");
+const menu = document.getElementById("menu");
+const gameover = document.getElementById("gameover");
+const hud = document.getElementById("hud");
+const statusText = document.getElementById("status");
+
+const chaseAudio = document.getElementById("chaseAudio");
+const screamAudio = document.getElementById("screamAudio");
+
+let scene, camera, renderer, entity;
+let playing = false;
+let caught = false;
+let startedAt = 0;
+let elapsed = 0;
+
+let yaw = 0;
+let pitch = 0;
+
+let player = new THREE.Vector3(0, 0, 8);
+let velocityY = 0;
+let onGround = true;
+
+let keys = {};
+let joystickX = 0;
+let joystickY = 0;
+let joystickActive = false;
+
+const clock = new THREE.Clock();
+
+function init() {
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x85cce5);
+    scene.fog = new THREE.Fog(0x85cce5, 35, 100);
+
+    camera = new THREE.PerspectiveCamera(
+        75,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        150
+    );
+
+    renderer = new THREE.WebGLRenderer({
+        antialias: true
+    });
+
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    container.appendChild(renderer.domElement);
+
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x637b54, 2));
+
+    const sun = new THREE.DirectionalLight(0xffffff, 2);
+    sun.position.set(10, 20, 10);
+    scene.add(sun);
+
+    createFloor();
+    createMap();
+    createEntity();
+
+    window.addEventListener("resize", resize);
+
+    window.addEventListener("keydown", e => {
+        keys[e.code] = true;
+    });
+
+    window.addEventListener("keyup", e => {
+        keys[e.code] = false;
+    });
+
+    renderer.domElement.addEventListener("click", () => {
+        if (playing && !isMobile()) {
+            renderer.domElement.requestPointerLock?.();
+        }
+    });
+
+    document.addEventListener("mousemove", e => {
+        if (document.pointerLockElement === renderer.domElement) {
+            yaw -= e.movementX * 0.002;
+            pitch -= e.movementY * 0.002;
+            pitch = THREE.MathUtils.clamp(pitch, -1.3, 1.3);
+        }
+    });
+
+    let lookPointer = null;
+    let lastX = 0;
+    let lastY = 0;
+
+    renderer.domElement.addEventListener("pointerdown", e => {
+        if (!playing || !isMobile()) return;
+
+        lookPointer = e.pointerId;
+        lastX = e.clientX;
+        lastY = e.clientY;
+
+        renderer.domElement.setPointerCapture(e.pointerId);
+    });
+
+    renderer.domElement.addEventListener("pointermove", e => {
+        if (lookPointer !== e.pointerId) return;
+
+        const dx = e.clientX - lastX;
+        const dy = e.clientY - lastY;
+
+        yaw -= dx * 0.006;
+        pitch -= dy * 0.006;
+        pitch = THREE.MathUtils.clamp(pitch, -1.3, 1.3);
+
+        lastX = e.clientX;
+        lastY = e.clientY;
+    });
+
+    renderer.domElement.addEventListener("pointerup", e => {
+        if (lookPointer === e.pointerId) lookPointer = null;
+    });
+
+    renderer.domElement.addEventListener("pointercancel", e => {
+        if (lookPointer === e.pointerId) lookPointer = null;
+    });
+
+    setupJoystick();
+    setupJump();
+
+    chaseAudio.addEventListener("error", () => {
+        statusText.textContent = "Chase səsi yüklənmədi: fayl adını yoxla.";
+    });
+
+    screamAudio.addEventListener("error", () => {
+        statusText.textContent = "Jumpscare səsi yüklənmədi: fayl adını yoxla.";
+    });
+
+    animate();
+}
+
+function createFloor() {
+    const canvas = document.createElement("canvas");
+    canvas.width = 512;
+    canvas.height = 512;
+
+    const ctx = canvas.getContext("2d");
+    const size = 64;
+
+    for (let y = 0; y < 8; y++) {
+        for (let x = 0; x < 8; x++) {
+            ctx.fillStyle = (x + y) % 2 === 0
+                ? "#83a875"
+                : "#769969";
+
+            ctx.fillRect(x * size, y * size, size, size);
+        }
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(18, 18);
+
+    const floor = new THREE.Mesh(
+        new THREE.PlaneGeometry(200, 200),
+        new THREE.MeshStandardMaterial({ map: texture })
+    );
+
+    floor.rotation.x = -Math.PI / 2;
+    scene.add(floor);
+}
+
+function createMap() {
+    const material = new THREE.MeshStandardMaterial({
+        color: 0x51595b
+    });
+
+    function wall(x, y, z, w, h, d) {
+        const mesh = new THREE.Mesh(
+            new THREE.BoxGeometry(w, h, d),
+            material
+        );
+
+        mesh.position.set(x, y, z);
+        scene.add(mesh);
+    }
+
+    wall(0, 3, -35, 70, 6, 2);
+    wall(0, 3, 35, 70, 6, 2);
+    wall(-35, 3, 0, 2, 6, 70);
+    wall(35, 3, 0, 2, 6, 70);
+
+    wall(8, 2, -7, 8, 4, 2);
+    wall(-10, 2, -18, 8, 4, 2);
+}
+
+function createEntity() {
+    const loader = new THREE.TextureLoader();
+
+    loader.load(
+        "IMG_20261122_184303_190.jpg",
+
+        texture => {
+            const aspect = texture.image.width / texture.image.height;
+
+            const material = new THREE.SpriteMaterial({
+                map: texture,
+                transparent: true,
+                depthWrite: false
+            });
+
+            entity = new THREE.Sprite(material);
+            entity.scale.set(3.5 * aspect, 3.5, 1);
+            entity.position.set(0, 1.8, -15);
+
+            scene.add(entity);
+            statusText.textContent = "";
+        },
+
+        undefined,
+
+        () => {
+            statusText.textContent = "Entity şəkli yüklənmədi!";
+        }
+    );
+}
+
+function setupJoystick() {
+    const joystick = document.getElementById("joystick");
+    const stick = document.getElementById("stick");
+
+    joystick.addEventListener("pointerdown", e => {
+        joystickActive = true;
+        joystick.setPointerCapture(e.pointerId);
+        moveJoystick(e);
+    });
+
+    joystick.addEventListener("pointermove", e => {
+        if (joystickActive) moveJoystick(e);
+    });
+
+    function moveJoystick(e) {
+        const rect = joystick.getBoundingClientRect();
+
+        let dx = e.clientX - (rect.left + rect.width / 2);
+        let dy = e.clientY - (rect.top + rect.height / 2);
+
+        const max = 38;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (distance > max) {
+            dx = dx / distance * max;
+            dy = dy / distance * max;
+        }
+
+        joystickX = dx / max;
+        joystickY = dy / max;
+
+        stick.style.transform = `translate(${dx}px, ${dy}px)`;
+    }
+
+    function stopJoystick() {
+        joystickActive = false;
+        joystickX = 0;
+        joystickY = 0;
+        stick.style.transform = "translate(0,0)";
+    }
+
+    joystick.addEventListener("pointerup", stopJoystick);
+    joystick.addEventListener("pointercancel", stopJoystick);
+    joystick.addEventListener("lostpointercapture", stopJoystick);
+}
+
+function setupJump() {
+    document.getElementById("jump").addEventListener("pointerdown", e => {
+        e.preventDefault();
+        jump();
+    });
+}
+
+function jump() {
+    if (playing && onGround) {
+        velocityY = 7;
+        onGround = false;
+    }
+}
+
+function isMobile() {
+    return window.innerWidth < 800;
+}
+
+function resize() {
+    if (!camera || !renderer) return;
+
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+async function startAudio() {
+    chaseAudio.pause();
+    screamAudio.pause();
+
+    chaseAudio.currentTime = 0;
+    screamAudio.currentTime = 0;
+
+    chaseAudio.volume = 0.3;
+
+    try {
+        await chaseAudio.play();
+        statusText.textContent = "";
+    } catch (error) {
+        statusText.textContent = "Səs başlamadı. MP3 faylını yoxla.";
+        console.error("Chase audio:", error);
+    }
+}
+
+function startGame() {
+    player.set(0, 0, 8);
+    velocityY = 0;
+    onGround = true;
+
+    yaw = 0;
+    pitch = 0;
+
+    caught = false;
+    playing = true;
+    elapsed = 0;
+    startedAt = performance.now();
+
+    if (entity) {
+        entity.position.set(0, 1.8, -15);
+    }
+
+    keys = {};
+    joystickX = 0;
+    joystickY = 0;
+
+    document.getElementById("stick").style.transform = "translate(0,0)";
+
+    menu.style.display = "none";
+    gameover.style.display = "none";
+
+    startAudio();
+
+    if (!isMobile()) {
+        renderer.domElement.requestPointerLock?.();
+    }
+}
+
+function endGame() {
+    if (caught) return;
+
+    caught = true;
+    playing = false;
+
+    chaseAudio.pause();
+    chaseAudio.currentTime = 0;
+
+    screamAudio.currentTime = 0;
+    screamAudio.play().catch(error => {
+        statusText.textContent = "Jumpscare səsi başlamadı. MP3 faylını yoxla.";
+        console.error("Jumpscare audio:", error);
+    });
+
+    gameover.style.display = "flex";
+
+    if (document.pointerLockElement) {
+        document.exitPointerLock();
+    }
+}
+
+function updatePlayer(delta) {
+    const forward = new THREE.Vector3(
+        -Math.sin(yaw),
+        0,
+        -Math.cos(yaw)
+    );
+
+    const right = new THREE.Vector3(
+        Math.cos(yaw),
+        0,
+        -Math.sin(yaw)
+    );
+
+    let moveForward = 0;
+    let moveSide = 0;
+
+    if (keys["KeyW"] || keys["ArrowUp"]) moveForward += 1;
+    if (keys["KeyS"] || keys["ArrowDown"]) moveForward -= 1;
+    if (keys["KeyD"] || keys["ArrowRight"]) moveSide += 1;
+    if (keys["KeyA"] || keys["ArrowLeft"]) moveSide -= 1;
+
+    moveForward -= joystickY;
+    moveSide += joystickX;
+
+    const movement = new THREE.Vector3();
+
+    movement.addScaledVector(forward, moveForward);
+    movement.addScaledVector(right, moveSide);
+
+    if (movement.length() > 1) movement.normalize();
+
+    player.addScaledVector(movement, 5 * delta);
+
+    player.x = THREE.MathUtils.clamp(player.x, -32, 32);
+    player.z = THREE.MathUtils.clamp(player.z, -32, 32);
+
+    if (keys["Space"] && onGround) jump();
+
+    velocityY -= 18 * delta;
+    player.y += velocityY * delta;
+
+    if (player.y <= 0) {
+        player.y = 0;
+        velocityY = 0;
+        onGround = true;
+    }
+
+    camera.position.set(player.x, player.y + 1.65, player.z);
+
+    camera.rotation.order = "YXZ";
+    camera.rotation.y = yaw;
+    camera.rotation.x = pitch;
+}
+
+function updateEntity(delta) {
+    if (!entity) return;
+
+    const dx = player.x - entity.position.x;
+    const dz = player.z - entity.position.z;
+
+    const distance = Math.sqrt(dx * dx + dz * dz);
+
+    if (distance > 0.1) {
+        const speed = 6.5;
+
+        entity.position.x += (dx / distance) * speed * delta;
+        entity.position.z += (dz / distance) * speed * delta;
+    }
+
+    entity.position.y = 1.8;
+
+    const volume = THREE.MathUtils.clamp(
+        1 - distance / 35,
+        0.15,
+        1
+    );
+
+    chaseAudio.volume = volume;
+
+    if (distance < 1.5) {
+        endGame();
+    }
+}
+
+function animate() {
+    requestAnimationFrame(animate);
+
+    const delta = Math.min(clock.getDelta(), 0.05);
+
+    if (playing) {
+        updatePlayer(delta);
+        updateEntity(delta);
+
+        elapsed = (performance.now() - startedAt) / 1000;
+
+        const minutes = Math.floor(elapsed / 60);
+        const seconds = Math.floor(elapsed % 60);
+
+        hud.textContent =
+            String(minutes).padStart(2, "0") + ":" +
+            String(seconds).padStart(2, "0");
+    }
+
+    renderer.render(scene, camera);
+}
+
+document.getElementById("start").addEventListener("click", startGame);
+document.getElementById("restart").addEventListener("click", startGame);
+
+init();
+</script>
+
+</body>
+</html>
